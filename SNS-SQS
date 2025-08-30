@@ -1,0 +1,195 @@
+# AWS SQS & SNS Mini Project: Image Processing App
+
+## What is SQS?
+Amazon Simple Queue Service (SQS) is a fully managed message queuing service that enables you to decouple and scale microservices, distributed systems, and serverless applications. SQS allows you to send, store, and receive messages between software components reliably.
+
+## What is SNS?
+Amazon Simple Notification Service (SNS) is a fully managed pub/sub messaging service that enables you to decouple microservices, distributed systems, and serverless applications. SNS allows you to send notifications to multiple subscribers through topics.
+
+---
+
+## Project Overview
+
+This project demonstrates how to use AWS SQS and SNS for an image processing workflow:
+
+1. **Image Upload:** User uploads an image to an S3 bucket (`input-bucket`).
+2. **SNS Notification:** S3 triggers an SNS topic when a new image is uploaded.
+3. **SQS Message:** SNS publishes the event to an SQS queue.
+4. **Lambda Processing:** An AWS Lambda function polls the SQS queue, processes the image (e.g., resizing, format conversion), and stores the output in another S3 bucket (`output-bucket`).
+
+---
+
+## Architecture Diagram
+
+```
+User
+ │
+ │ (Upload Image)
+ ▼
+S3 Input Bucket
+ │
+ │ (Event Notification)
+ ▼
+SNS Topic
+ │
+ │ (Publish Message)
+ ▼
+SQS Queue
+ │
+ │ (Poll Message)
+ ▼
+Lambda Function
+ │
+ │ (Processed Image)
+ ▼
+S3 Output Bucket
+```
+
+---
+
+## Folder Structure
+
+```
+AWS-learning-01/
+│
+├── README.md                # Project documentation and setup instructions
+├── SNS-SQS                  # Project summary and concepts (this file)
+├── src/
+│   ├── lambda/
+│   │   └── imageProcessor.js    # Lambda function code for image processing
+│   └── utils/
+│       └── s3Utils.js          # Helper functions for S3 operations
+├── infra/
+│   ├── template.yaml           # AWS CloudFormation/SAM template for resources
+│   └── event.json              # Sample event for Lambda testing
+└── .gitignore                  # Ignore node_modules, credentials, etc.
+```
+
+---
+
+## Files to Push to GitHub
+
+- **README.md:** Project overview, architecture, setup instructions, and usage.
+- **SNS-SQS:** This file, with concepts and project summary.
+- **src/lambda/imageProcessor.js:** Lambda function to process images.
+- **src/utils/s3Utils.js:** Utility functions for S3 operations.
+- **infra/template.yaml:** Infrastructure as code (CloudFormation/SAM template) to create S3 buckets, SNS topic, SQS queue, and Lambda function.
+- **infra/event.json:** Sample event payload for local Lambda testing.
+- **.gitignore:** To exclude unnecessary files from GitHub.
+
+---
+
+## Example Lambda Function (imageProcessor.js)
+
+```javascript
+// src/lambda/imageProcessor.js
+const AWS = require('aws-sdk');
+const S3 = new AWS.S3();
+const sharp = require('sharp'); // For image processing
+
+exports.handler = async (event) => {
+    for (const record of event.Records) {
+        const message = JSON.parse(record.body);
+        const bucket = message.Records[0].s3.bucket.name;
+        const key = decodeURIComponent(message.Records[0].s3.object.key.replace(/\+/g, ' '));
+
+        // Download image from S3
+        const image = await S3.getObject({ Bucket: bucket, Key: key }).promise();
+
+        // Process image (e.g., resize)
+        const processedImage = await sharp(image.Body).resize(256, 256).toBuffer();
+
+        // Upload to output bucket
+        await S3.putObject({
+            Bucket: 'output-bucket',
+            Key: `processed/${key}`,
+            Body: processedImage,
+            ContentType: 'image/jpeg'
+        }).promise();
+    }
+    return { status: 'done' };
+};
+```
+
+---
+
+## Example Infrastructure Template (template.yaml)
+
+```yaml
+# infra/template.yaml
+AWSTemplateFormatVersion: '2010-09-09'
+Resources:
+  InputBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: input-bucket
+
+  OutputBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: output-bucket
+
+  SNSTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: image-upload-topic
+
+  SQSQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: image-processing-queue
+
+  LambdaFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: imageProcessor
+      Handler: src/lambda/imageProcessor.handler
+      Runtime: nodejs18.x
+      Role: arn:aws:iam::YOUR_ACCOUNT_ID:role/lambda-exec-role
+      Code:
+        S3Bucket: YOUR_CODE_BUCKET
+        S3Key: lambda/imageProcessor.zip
+      Environment:
+        Variables:
+          OUTPUT_BUCKET: output-bucket
+
+  S3EventToSNS:
+    Type: AWS::S3::BucketNotification
+    Properties:
+      Bucket: !Ref InputBucket
+      NotificationConfiguration:
+        TopicConfigurations:
+          - Event: s3:ObjectCreated:*
+            Topic: !Ref SNSTopic
+
+  SNSSubscription:
+    Type: AWS::SNS::Subscription
+    Properties:
+      TopicArn: !Ref SNSTopic
+      Protocol: sqs
+      Endpoint: !GetAtt SQSQueue.Arn
+```
+
+---
+
+## Example .gitignore
+
+```
+node_modules/
+.env
+*.zip
+.DS_Store
+```
+
+---
+
+## Next Steps
+
+1. Fill out the README.md with setup and usage instructions.
+2. Implement the Lambda function and utility code.
+3. Deploy resources using the infrastructure template.
+4. Test the workflow end-to-end.
+
+---
+
+**Push all the above files and structure to your GitHub repository for future reference and collaboration.**
